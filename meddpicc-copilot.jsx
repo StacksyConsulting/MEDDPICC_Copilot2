@@ -41,41 +41,6 @@ const MEDDPICCCopilot = () => {
   const [simulationIndex, setSimulationIndex] = useState(0);
   const transcriptEndRef = useRef(null);
 
-  // System prompt for Claude API
-  const SYSTEM_PROMPT = `You are a Real-Time MEDDPICC Qualification Copilot for B2B SaaS sales calls.
-
-Primary Objective: Help the sales rep qualify prospect intent early by:
-- Detecting MEDDPICC signals in the live transcript
-- Identifying missing/weak qualification areas
-- Suggesting short, high-impact follow-up questions
-- Producing an end-of-call MEDDPICC scorecard + Intent Confidence Score + Next Action
-
-Constraints (Non-Negotiable):
-- Do NOT coach the rep on tone, empathy, objection handling, or talk tracks
-- Do NOT summarize the whole call unless it supports qualification
-- Do NOT invent details that were not said in the transcript
-- Be conservative. If something is unclear, mark it as "Weak/Unclear" or "Not Detected"
-- Optimize for minimal interruption: prompts must be brief and optional
-
-Focus only on these MEDDPICC elements:
-- Metrics (measurable impact, targets, KPIs)
-- Economic Buyer (budget authority, decision maker)
-- Decision Process (steps, timeline, criteria)
-- Pain (current problem + consequences)
-
-Output Format: Return ONLY valid JSON with this structure:
-{
-  "meddpicc": {
-    "metrics": {"status": "detected|weak|not_detected", "evidence": [], "confidence": 0.0, "missing_info": []},
-    "economic_buyer": {"status": "detected|weak|not_detected", "evidence": [], "confidence": 0.0, "missing_info": []},
-    "decision_process": {"status": "detected|weak|not_detected", "evidence": [], "confidence": 0.0, "missing_info": []},
-    "pain": {"status": "detected|weak|not_detected", "evidence": [], "confidence": 0.0, "missing_info": []}
-  },
-  "suggested_questions": [{"meddpicc_area": "string", "priority": "high|medium|low", "question": "string", "why_now": "string"}],
-  "intent_confidence": {"level": "low|medium|high", "reasoning": [], "deal_risk_flags": []},
-  "recommended_next_action": {"action": "proceed|re_qualify|disengage", "rationale": "string", "immediate_next_steps": []}
-}`;
-
   // Scroll to bottom of transcript
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,42 +51,33 @@ Output Format: Return ONLY valid JSON with this structure:
     if (!isCallActive) return;
 
     const interval = setInterval(() => {
-      setSimulationIndex(prevIndex => {
-        if (prevIndex < DEMO_TRANSCRIPT.length) {
-          const newEntry = DEMO_TRANSCRIPT[prevIndex];
-          setTranscript(prev => {
-            const updated = [...prev, newEntry];
-            
-            // Trigger AI analysis every 2-3 transcript entries
-            if (prevIndex % 2 === 1) {
-              analyzeTranscript(updated);
-            }
-            
-            return updated;
-          });
-          
-          return prevIndex + 1;
-        } else {
-          // End of demo transcript
-          setIsCallActive(false);
-          return prevIndex;
+      if (simulationIndex < DEMO_TRANSCRIPT.length) {
+        const newEntry = DEMO_TRANSCRIPT[simulationIndex];
+        setTranscript(prev => [...prev, newEntry]);
+        setSimulationIndex(prev => prev + 1);
+
+        // Trigger AI analysis every 2-3 transcript entries
+        if (simulationIndex % 2 === 1) {
+          analyzeTranscript([...transcript, newEntry]);
         }
-      });
+      } else {
+        // End of demo transcript
+        setIsCallActive(false);
+      }
     }, 4000); // New transcript every 4 seconds
 
     return () => clearInterval(interval);
-  }, [isCallActive]);
+  }, [isCallActive, simulationIndex]);
 
   const analyzeTranscript = async (currentTranscript) => {
     setIsProcessing(true);
     setError(null);
 
     try {
-      // Call our Vercel serverless function instead of Claude API directly
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
+      const response = await fetch("/api/analyze", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           transcript: currentTranscript,
@@ -130,8 +86,7 @@ Output Format: Return ONLY valid JSON with this structure:
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'API request failed');
+        throw new Error('API request failed');
       }
 
       const result = await response.json();
@@ -140,13 +95,9 @@ Output Format: Return ONLY valid JSON with this structure:
       setSuggestedQuestions(result.suggested_questions || []);
       setIntentScore(result.intent_confidence);
 
-    } catch (err) {
-      console.error('Analysis error:', err);
-      setError(`Analysis failed: ${err.message}`);
-      
-      // Fallback to basic mock if API fails
-      setError('Using offline mode - API unavailable');
-      // You can add fallback mock logic here if needed
+    } catch (error) {
+      console.error('Analysis error:', error);
+      setError('Analysis failed - check API key');
     } finally {
       setIsProcessing(false);
     }
@@ -288,12 +239,6 @@ Output Format: Return ONLY valid JSON with this structure:
                 <div className="flex items-center gap-2 text-blue-300">
                   <Circle className="w-4 h-4 animate-spin" />
                   <span className="text-xs font-medium">Analyzing...</span>
-                </div>
-              )}
-              {error && (
-                <div className="flex items-center gap-2 text-amber-300">
-                  <AlertCircle className="w-4 h-4" />
-                  <span className="text-xs font-medium">{error}</span>
                 </div>
               )}
             </div>
