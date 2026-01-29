@@ -36,6 +36,7 @@ const MEDDPICCCopilot = () => {
   const [suggestedQuestions, setSuggestedQuestions] = useState([]);
   const [intentScore, setIntentScore] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [callId] = useState(`call_${Date.now()}`);
   const [simulationIndex, setSimulationIndex] = useState(0);
   const transcriptEndRef = useRef(null);
@@ -85,88 +86,67 @@ Output Format: Return ONLY valid JSON with this structure:
     if (!isCallActive) return;
 
     const interval = setInterval(() => {
-      if (simulationIndex < DEMO_TRANSCRIPT.length) {
-        const newEntry = DEMO_TRANSCRIPT[simulationIndex];
-        setTranscript(prev => [...prev, newEntry]);
-        setSimulationIndex(prev => prev + 1);
-
-        // Trigger AI analysis every 2-3 transcript entries
-        if (simulationIndex % 2 === 1) {
-          analyzeTranscript([...transcript, newEntry]);
+      setSimulationIndex(prevIndex => {
+        if (prevIndex < DEMO_TRANSCRIPT.length) {
+          const newEntry = DEMO_TRANSCRIPT[prevIndex];
+          setTranscript(prev => {
+            const updated = [...prev, newEntry];
+            
+            // Trigger AI analysis every 2-3 transcript entries
+            if (prevIndex % 2 === 1) {
+              analyzeTranscript(updated);
+            }
+            
+            return updated;
+          });
+          
+          return prevIndex + 1;
+        } else {
+          // End of demo transcript
+          setIsCallActive(false);
+          return prevIndex;
         }
-      } else {
-        // End of demo transcript
-        setIsCallActive(false);
-      }
+      });
     }, 4000); // New transcript every 4 seconds
 
     return () => clearInterval(interval);
-  }, [isCallActive, simulationIndex]);
+  }, [isCallActive]);
 
   const analyzeTranscript = async (currentTranscript) => {
     setIsProcessing(true);
+    setError(null);
 
     try {
-      const userPrompt = `You are receiving a live transcript stream. Update MEDDPICC state conservatively and suggest up to 3 questions maximum.
-
-Call ID: ${callId}
-Timestamp: ${new Date().toISOString()}
-
-Current Transcript:
-${currentTranscript.map(t => `${t.speaker.toUpperCase()}: ${t.text}`).join('\n')}
-
-Tasks:
-1. Update statuses for Metrics, Economic Buyer, Decision Process, Pain
-2. Extract evidence from the transcript
-3. Identify what is missing/weak
-4. Suggest up to 3 questions max, highest impact first
-5. Output strict JSON only following the schema
-
-Scoring Guidelines:
-- Metrics: Detected if measurable impact/KPIs/timelines stated
-- Economic Buyer: Detected if budget authority/decision maker identified
-- Decision Process: Detected if steps/timeline/criteria described
-- Pain: Detected if clear current problem + consequences described
-
-Intent Confidence:
-- High: Pain + Decision Process detected AND (Metrics OR Economic Buyer detected)
-- Medium: Pain detected but Decision Process/Economic Buyer unclear
-- Low: Pain weak/not detected OR no Decision Process and unclear buyer`;
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
+      // Call our Vercel serverless function instead of Claude API directly
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: SYSTEM_PROMPT,
-          messages: [
-            { role: "user", content: userPrompt }
-          ],
+          transcript: currentTranscript,
+          callId: callId
         })
       });
 
-      const data = await response.json();
-      
-      // Extract JSON from response
-      let jsonText = data.content
-        .filter(item => item.type === "text")
-        .map(item => item.text)
-        .join("");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'API request failed');
+      }
 
-      // Clean up markdown code blocks if present
-      jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-      const result = JSON.parse(jsonText);
+      const result = await response.json();
 
       setMeddpiccState(result.meddpicc);
       setSuggestedQuestions(result.suggested_questions || []);
       setIntentScore(result.intent_confidence);
 
-    } catch (error) {
-      console.error('Analysis error:', error);
+    } catch (err) {
+      console.error('Analysis error:', err);
+      setError(`Analysis failed: ${err.message}`);
+      
+      // Fallback to basic mock if API fails
+      setError('Using offline mode - API unavailable');
+      // You can add fallback mock logic here if needed
     } finally {
       setIsProcessing(false);
     }
@@ -308,6 +288,12 @@ Intent Confidence:
                 <div className="flex items-center gap-2 text-blue-300">
                   <Circle className="w-4 h-4 animate-spin" />
                   <span className="text-xs font-medium">Analyzing...</span>
+                </div>
+              )}
+              {error && (
+                <div className="flex items-center gap-2 text-amber-300">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="text-xs font-medium">{error}</span>
                 </div>
               )}
             </div>
